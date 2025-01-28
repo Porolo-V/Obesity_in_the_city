@@ -431,9 +431,10 @@ Figure4 <- corrplot(cor_matrix, method = "color",
 
 ```{r fig5}
 
-#
-#code
-#
+Figure5 <- cor_matrix %>% 
+  network_plot(min_cor = .0)
+
+Figure5
 
 ```
 
@@ -464,9 +465,8 @@ Figure6 <- corrplot(cor_matrix_female, method = "color",
 
 ```{r fig7}
 
-#
-#code
-#
+cor_matrix_female%>%
+  network_plot(min_cor = .0)
 
 ```
 
