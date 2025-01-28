@@ -83,10 +83,10 @@ Based on these evaluations, we concluded that the **agreement between bioimpedan
 
 ___
 
-###Regression
+### Regression
 
 ![Image](https://github.com/user-attachments/assets/b8c36137-79fc-4a7d-8efe-c4557dac5560)
 
-###Agreement of metrics after correction 
+### Agreement of metrics after correction 
 
 ![Image](https://github.com/user-attachments/assets/4631fbea-75b4-4a21-836f-ff4f601513c9)
