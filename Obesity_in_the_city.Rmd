@@ -1,0 +1,902 @@
+---
+title: "Obesity in the city"
+author: "Porolo_v, Derkachev_I, Saldaeva_V, Zaitsev_N, Bozhko_A"
+date: "2024-12-19"
+output: 
+  html_document:
+    number_sections: true
+    toc: true
+    toc_depth: 2
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	error = FALSE,
+	fig.align = "center",
+	message = FALSE,
+	warning = FALSE
+)
+library(tidyverse)
+library(readxl)
+library(psych)
+library(flextable)
+library(GGally)
+library(epiR)
+library(smplot2)
+library(gridExtra)
+library(grid)
+library(BlandAltmanLeh)
+library(plotly)
+library(viridis)
+library(broom)
+library(lmtest)
+library(sandwich)
+library(mcr)
+library(corrr)
+library(corrplot)
+
+theme_custom <- theme_bw()+ theme(
+    plot.title = element_text(size = 15, hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5),
+    strip.text = element_text(size = 10),
+    axis.text = element_text(size = 10),
+    axis.title = element_text(size = 15),
+    legend.title = element_text(size = 15),
+    legend.text = element_text(size = 10)
+  )
+```
+
+# Reading data & data processing
+
+```{r reading}
+data <- read_xlsx("data/InstBioinf.xlsx")
+```
+
+```{r processing1}
+data <- data %>% 
+  mutate(
+    Sex = case_when(
+      Sex %in% c("M", "М") ~ "Male",
+      Sex %in% c("F", "Ж") ~ "Female"
+    ) %>% as.factor(), 
+    across(where(is.character), ~ round(as.numeric(.x), 1)),
+    BMI = round(Weight / (Height / 100)^2, 2), #create BMI category
+    BMI_category = cut(
+      BMI, 
+      breaks = c(-Inf, 18.5, 25, 30, 40, Inf),
+      labels = c("Underweight", "Normal", "Overweight", "Obesity", "Morbid obesity"),
+      include.lowest = TRUE
+    )
+  )
+```
+
+### Removing objects with misprints
+
+```{r remove misprints}
+id_to_remove <- c(176, 195, 268)
+data <- data %>% filter(!ID %in% id_to_remove)
+```
+
+# Descriptive Statistics
+
+## All data
+
+```{r describe_stats_func, results='hold', fig.align='center'}
+
+create_descriptive_table <- function(data, header_title) {
+  data %>%
+    select(-ID, -Sex, -BMI_category) %>%  
+    describe() %>% 
+    as.data.frame() %>% 
+    rownames_to_column("variable") %>% 
+    mutate(across(where(is.numeric), ~ round(.x, 2))) %>%  
+    flextable() %>% 
+    add_header_lines(values = header_title) %>%  
+    align(align = "center", part = "header") %>% 
+    bg(i = ~ (seq_along(variable) %% 2 == 0), bg = "#f0f0f0", part = "body") %>% 
+    autofit()
+}
+```
+
+```{r describe_stats_all}
+table_all <- create_descriptive_table(data, "Descriptive Statistics (All)")
+table_all
+
+save_as_image(table_all, "Describe_stats_all.png")
+```
+
+## Separated by sex
+
+```{r data_sex_split}
+data_male <- data %>% filter(Sex %in% "Male")
+data_female <- data %>% filter(Sex %in% "Female")
+
+```
+
+```{r describe_stats_male}
+table_male <- create_descriptive_table(data_male, "Descriptive Statistics (Male)")
+table_male
+
+save_as_image(table_male, "Describe_stats_male.png")
+```
+
+```{r describe_stats_female}
+table_female <- create_descriptive_table(data_female, "Descriptive Statistics (Female)")
+table_female
+
+save_as_image(table_female, "Describe_stats_female.png")
+```
+
+## Descriptive Statistics: Figures
+
+### Figure 1. Distribution by sex and BMI categories
+
+```{r fig1}
+
+bmi_counts <- data %>% 
+  count(Sex, BMI_category) %>% 
+  group_by(Sex) %>% 
+  mutate(percent = n / sum(n) * 100,
+         total = sum(n)) %>%
+  ungroup()
+
+#va1
+Figure1 <- ggplot(bmi_counts, aes(x = Sex, y = n, fill = BMI_category)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +
+  geom_text(aes(label = paste0(n, " (", round(percent, 1), "%)")), 
+            position = position_stack(vjust = 0.5), size = 4, color = "black") +
+  geom_text(data = bmi_counts, aes(x = Sex, y = total, label = paste0("Total: ", total)), 
+            inherit.aes = FALSE, 
+            vjust = -0.5, size = 4, fontface = "bold", color = "black") +
+  scale_fill_manual(values = c("#ccebc5", "#ffffcc", "#ffed6f", "#fdae61", "#d73027")) +
+  scale_y_continuous(limits = c(0, 210), breaks = seq(0, 210, by = 50)) +
+  labs(title = "Distribution by sex and BMI categories", 
+       x = "Sex", y = "Observations", fill = "BMI category") + #class/type?
+  theme_custom+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        panel.grid = element_blank()) 
+
+ggsave("Figure 1.png", Figure1)
+Figure1
+```
+
+### Figure 2. Distribution of BMI categories by age groups
+
+```{r fig2}
+data <- data %>%
+  mutate(age_group = cut(Age, 
+                         breaks = seq(floor(min(Age, na.rm = TRUE) / 10) * 10, 
+                                      ceiling(max(Age, na.rm = TRUE) / 10) * 10, 
+                                      by = 10), 
+                         include.lowest = TRUE, 
+                         right = FALSE, 
+                         labels = paste(seq(floor(min(Age, na.rm = TRUE) / 10) * 10, 
+                                            ceiling(max(Age, na.rm = TRUE) / 10) * 10 - 10, 
+                                            by = 10), 
+                                        seq(floor(min(Age, na.rm = TRUE) / 10) * 10 + 9, 
+                                            ceiling(max(Age, na.rm = TRUE) / 10) * 10, 
+                                            by = 10), 
+                                        sep = "-")))
+
+
+age_bmi_counts <- data %>%
+  group_by(Sex, age_group, BMI_category) %>%
+  summarise(n = n(), .groups = "drop")
+
+
+Figure2 <- ggplot(age_bmi_counts, aes(x = age_group, y = n, fill = BMI_category)) +
+  geom_bar(stat = "identity", position = "stack", color = "black") +
+  scale_fill_viridis_d(option = "D", direction = -1, alpha = 0.8) +  
+  labs(title = "Distribution of BMI categories by age groups", 
+       x = "Age group", y = "Observations", fill = "BMI category") +
+  facet_wrap(~Sex, nrow = 2) +
+  theme_custom +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+        legend.position = "right")
+
+ggsave("Figure 2.png", Figure2)
+Figure2
+
+```
+
+### Figure 3. Ratio of BMI to body composition.
+
+```{r bmi_vs_composition_func 3}
+plot_bmi_vs_composition <- function(data, sex_filter = NULL) {
+  if (!is.null(sex_filter)) {
+    data <- data %>% filter(Sex == sex_filter)
+  }
+  
+  
+  bmi_categories <- data.frame(
+    xmin = c(-Inf, 18.5, 25, 30, 40),
+    xmax = c(18.5, 25, 30, 40, Inf),
+    label = c("Underweight", "Normal", "Overweight", "Obesity", "Morbid obesity"),
+    fill = c("#ccebc5", "#ffffcc", "#ffed6f", "#fdae61", "#d73027")
+  )
+  
+
+  bmi_counts <- data %>%
+    mutate(category = cut(BMI, breaks = c(-Inf, 18.5, 25, 30, 40, Inf), 
+                          labels = c("Underweight", "Normal", "Overweight", "Obesity", "Morbid obesity"),
+                          include.lowest = TRUE)) %>%
+    count(category) %>%
+    mutate(percent = n / sum(n) * 100)
+  
+
+  bmi_categories <- bmi_categories %>%
+    left_join(bmi_counts, by = c("label" = "category")) %>%
+    mutate(percent_label = ifelse(!is.na(percent), paste0(round(percent, 1), "%"), "0%"))
+  
+
+  data_long <- data %>%
+    pivot_longer(cols = c(FM_BIA, FM_US, FFM_BIA, FFM_US), 
+                 names_to = "Indicator", 
+                 values_to = "Value") %>%
+    mutate(Method = ifelse(grepl("BIA", Indicator), "BIA", "US"),
+           BMI_category = cut(BMI, breaks = c(-Inf, 18.5, 25, 30, 40, Inf), 
+                              labels = c("Underweight", "Normal", "Overweight", "Obesity", "Morbid obesity"),
+                              include.lowest = TRUE),
+           Legend = Indicator)  # Обновляем подписи для легенды
+  
+
+  plot <- ggplot(data_long, aes(x = BMI, y = Value, color = Legend, shape = Legend)) +
+    geom_rect(data = bmi_categories, 
+              aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, fill = label), 
+              inherit.aes = FALSE, alpha = 0.2) +
+    geom_text(data = bmi_categories, 
+              aes(x = (xmin + xmax) / 2, y = 95, label = percent_label), 
+              inherit.aes = FALSE, color = "black", size = 4.5, vjust = 0) +
+    geom_point(alpha = 0.7, size = 3) +
+    geom_vline(data = bmi_categories, aes(xintercept = xmax), 
+               linetype = "dashed", color = "black", size = 0.8) +
+    scale_fill_manual(values = setNames(bmi_categories$fill, bmi_categories$label)) +
+    scale_color_manual(values = c("FM_BIA" = "tomato", 
+                                  "FM_US" = "orange",
+                                  "FFM_BIA" = "dodgerblue",
+                                  "FFM_US" = "forestgreen")) +
+    scale_shape_manual(values = c("FM_BIA" = 16, "FM_US" = 17, 
+                                  "FFM_BIA" = 16, "FFM_US" = 17)) +
+    labs(
+      title = paste("Ratio of BMI to Body Composition", 
+                    if (!is.null(sex_filter)) paste("for", ifelse(sex_filter == "Male", "male", "female")) else ""),
+      x = "BMI",
+      y = "Weight, kg",
+      fill = "BMI Category",  
+      color = "Metric",
+      shape = "Metric"
+    ) +
+    theme_custom +
+    theme(
+      legend.position = "right", 
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+      axis.title = element_text(size = 15),
+      legend.key = element_rect(color = "black")
+    ) +
+    scale_y_continuous(limits = c(0, 150), breaks = seq(0, 150, by = 25)) +  
+    scale_x_continuous(limits = c(15, 65), breaks = seq(15, 65, by = 5)) +
+    guides(
+      color = guide_legend(title = "Metric"),
+      shape = guide_legend(title = "Metric")
+    )
+  
+  return(plot)
+}
+
+
+```
+
+```{r fig3, fig.height=6, fig.width=10}
+
+Figure3.1 <- plot_bmi_vs_composition(data, sex_filter = "Male")
+Figure3.2 <-plot_bmi_vs_composition(data, sex_filter = "Female")
+Figure3.3 <-plot_bmi_vs_composition(data)
+
+ggsave("Figure 3.1.png", Figure3.1, width = 10, height = 6)
+ggsave("Figure 3.2.png", Figure3.2, width = 10, height = 6)
+ggsave("Figure 3.3.png", Figure3.3, width = 10, height = 6)
+
+Figure3.1
+Figure3.2
+Figure3.3
+```
+
+## Difference assessment by boxplots
+
+```{r boxplot1}
+
+#
+#code
+#
+
+```
+
+## Paired Data Plots Function
+
+```{r create_comparison_plot_func}
+create_comparison_plot <- function(data, 
+                                   cols_to_pivot, 
+                                   group_var = "ID", 
+                                   color_var = "Method", 
+                                   facet_var = NULL, 
+                                   tooltip_text = "text", 
+                                   theme_text_size = 14, 
+                                   use_plotly = TRUE,
+                                   add_boxplots = FALSE) {
+  
+  # Reshaping to long format
+  data_long <- data %>%
+    pivot_longer(cols = all_of(cols_to_pivot), names_to = "Method", values_to = "Value")
+  
+  # Basic plot
+  p <- ggplot(data_long, aes(x = Method, 
+                             y = Value, 
+                             group = .data[[group_var]], 
+                             text = paste(group_var, ":", .data[[group_var]]))) +
+    geom_line(aes(group = .data[[group_var]]), 
+              color = "darkgrey",
+              alpha = 0.8) +  
+    geom_point(aes(color = .data[[color_var]])) +
+    theme_minimal() +
+    theme(text = element_text(size = theme_text_size),
+          plot.title = element_text(hjust = 0.5),
+          legend.position = "none")
+  
+  # Faceting
+  if (!is.null(facet_var)) {
+    p <- p + facet_wrap(as.formula(paste("~", facet_var)))
+  }
+  # Boxplots
+  if (add_boxplots) {
+    p <- p + 
+      geom_boxplot(data = data_long, 
+                   aes(x = Method, 
+                       y = Value, 
+                       color = .data[[color_var]]), 
+                   alpha = 0,
+                   outlier.shape = NA,
+                   width = 0.4,
+                   inherit.aes = FALSE) # Do not inherit global aes
+  }
+  
+  
+  # ggplot в plotly
+  if (use_plotly) {
+    return(ggplotly(p, tooltip = tooltip_text))
+  }
+  
+  return(p)
+}
+
+
+```
+
+### FM_BIA vs FM_US Plot
+
+```{r create_comparison_plot_FM}
+create_comparison_plot(data, 
+                       cols_to_pivot = c("FM_BIA", "FM_US"), 
+                       facet_var = "Sex", 
+                       use_plotly = TRUE, 
+                       add_boxplots = TRUE)
+```
+
+### BF_BIA vs BF_US Plot
+
+```{r create_comparison_plot_BF}
+create_comparison_plot(data, 
+                       cols_to_pivot = c("BF_BIA", "BF_US"), 
+                       facet_var = "Sex", 
+                       add_boxplots = TRUE)
+```
+
+### FFM_BIA vs FFM_US Plot
+
+```{r create_comparison_plot_FFM}
+create_comparison_plot(data, 
+                       cols_to_pivot = c("FFM_BIA", "FFM_US"), 
+                       facet_var = "Sex",
+                       add_boxplots = TRUE)
+```
+
+
+## Pearson correlation. Figures
+
+### Figure 4. Corrplot - Male
+
+```{r fig4, fig.height=10, fig.width=10}
+
+data_numeric_male <-  data_male %>% 
+  select(-ID) %>%       
+  select_if(is.numeric)
+cor_matrix <- cor(data_numeric_male, use = "pairwise.complete.obs")
+cor_df <- correlate(cor_matrix)
+
+Figure4 <- corrplot(cor_matrix, method = "color", 
+         type = "lower", 
+         order = "hclust", 
+         tl.col = "black", 
+         tl.srt = 90,
+         tl.cex = 1.5,
+         tl.pos = "ld",
+         diag = FALSE,
+         addCoef.col = "black", 
+         col = viridis(10, alpha = 0.8, end = 0.9))
+
+
+```
+
+### Figure 5. Network_plot - Male
+
+```{r fig5}
+
+#
+#code
+#
+
+```
+
+### Figure 6. Corrplot - Female
+
+```{r fig6, fig.height=10, fig.width=10}
+
+data_numeric_female <-  data_female %>% 
+  select(-ID) %>%       
+  select_if(is.numeric)
+cor_matrix_female <- cor(data_numeric_female, use = "pairwise.complete.obs")
+cor_df_female <- correlate(cor_matrix)
+
+Figure6 <- corrplot(cor_matrix_female, method = "color", 
+         type = "upper", 
+         order = "hclust", 
+         tl.col = "black", 
+         tl.srt = 90,
+         tl.cex = 1.5,
+         tl.pos = "td",
+         diag = FALSE,
+         addCoef.col = "black", 
+         col = plasma(10, alpha = 0.7, end = 0.9)) 
+
+```
+
+### Figure 7. Network_plot - Female
+
+```{r fig7}
+
+#
+#code
+#
+
+```
+
+# Lin’s concordance correlation coefficient
+
+```{r calculate_ccc_with_ci_func}
+
+calculate_ccc_with_ci <- function(data, var1, var2) {
+  ccc <- epi.ccc(data[[var1]], data[[var2]])$rho.c
+  
+
+  formatted_ccc <- paste(
+    "CCC = ", round(ccc[1], 2), 
+    " (", round(ccc[2], 2), " - ", round(ccc[3], 2), ")", 
+    sep = ""
+  )
+  
+  return(formatted_ccc)
+}
+
+```
+
+```{r table_ccc_with_ci}
+ccc_all_fm <- calculate_ccc_with_ci(data, "FM_BIA", "FM_US")
+ccc_all_bf <- calculate_ccc_with_ci(data, "BF_BIA", "BF_US")
+ccc_all_ffm <- calculate_ccc_with_ci(data, "FFM_BIA", "FFM_US")
+
+ccc_male_fm <- calculate_ccc_with_ci(data_male, "FM_BIA", "FM_US")
+ccc_male_bf <- calculate_ccc_with_ci(data_male, "BF_BIA", "BF_US")
+ccc_male_ffm <- calculate_ccc_with_ci(data_male, "FFM_BIA", "FFM_US")
+
+ccc_female_fm <- calculate_ccc_with_ci(data_female, "FM_BIA", "FM_US")
+ccc_female_bf <- calculate_ccc_with_ci(data_female, "BF_BIA", "BF_US")
+ccc_female_ffm <- calculate_ccc_with_ci(data_female, "FFM_BIA", "FFM_US")
+
+
+ccc_results_gender <- tibble(
+  Category = c("All","Male","Female" ),
+  `FM_BIA - FM_US` = c(ccc_all_fm, ccc_male_fm, ccc_female_fm),
+  `BF_BIA - BF_US` = c(ccc_all_bf, ccc_male_bf, ccc_female_bf),
+  `FFM_BIA - FFM_US` = c(ccc_all_ffm, ccc_male_ffm, ccc_female_ffm)
+)
+
+
+ccc_table <- flextable(ccc_results_gender, cwidth = 2,
+  cheight = 0.25)%>%
+  theme_box()
+
+save_as_image(ccc_table, path = "ccc_table.png")
+ccc_table
+```
+
+## Lin’s CCC with Pearson correlation.
+
+```{r create_correlation_plot_func}
+
+create_correlation_plot <- function(data, x_var, y_var, annotate_x, annotate_y, ccc_label, x_label, y_label) {
+  ggplot(data, aes_string(x = x_var, y = y_var)) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    geom_point() +
+    sm_statCorr(color = "red", corr_method = "pearson", R2 = FALSE) +
+    annotate("text", x = as.numeric(annotate_x), y = as.numeric(annotate_y), label = ccc_label, size = 4) +
+    labs(x = x_label, y = y_label) +
+    theme_minimal() +
+    theme(panel.border = element_rect(color = "black", fill = NA, size = 1))
+}
+```
+
+```{r create_plots_func}
+
+create_plots <- function(data, sex, variables, annotations) {
+  plots <- lapply(1:length(variables), function(i) {
+    create_correlation_plot(
+      data = data,
+      x_var = variables[[i]][1],
+      y_var = variables[[i]][2],
+      annotate_x = annotations[[i]][1],
+      annotate_y = annotations[[i]][2],
+      ccc_label = annotations[[i]][3],
+      x_label = variables[[i]][1],
+      y_label = variables[[i]][2]
+    )
+  })
+  return(plots)
+}
+```
+
+```{r combine_plots_func}
+
+combine_plots <- function(top_title, bottom_title, note, top_row, bottom_row) {
+  grid.arrange(
+    textGrob(top_title, gp = gpar(fontsize = 16, fontface = "bold")),
+    top_row,
+    textGrob(bottom_title, gp = gpar(fontsize = 16, fontface = "bold")),
+    bottom_row,
+    textGrob(note, gp = gpar(fontsize = 16, fontface = "italic"), hjust = 0, x = 0),
+    ncol = 1,
+    heights = c(0.1, 0.4, 0.1, 0.4, 0.1)
+  )
+}
+```
+
+```{r pearson_lins_plots, fig.height=10, fig.width=10}
+
+male_variables <- list(c("FM_BIA", "FM_US"), c("BF_BIA", "BF_US"), c("FFM_BIA", "FFM_US"))
+female_variables <- list(c("FM_BIA", "FM_US"), c("BF_BIA", "BF_US"), c("FFM_BIA", "FFM_US"))
+
+male_annotations <- list(c(26, 58, ccc_male_fm), c(17, 33, ccc_male_bf), c(69, 125, ccc_male_ffm))
+female_annotations <- list(c(32, 70, ccc_female_fm), c(27, 42, ccc_female_bf), c(37, 85, ccc_female_ffm))
+
+
+male_plots <- create_plots(data_male, "Male", male_variables, male_annotations)
+female_plots <- create_plots(data_female, "Female", female_variables, female_annotations)
+
+top_row <- arrangeGrob(grobs = male_plots, ncol = 3)
+bottom_row <- arrangeGrob(grobs = female_plots, ncol = 3)
+
+
+CCC_sex_separated <- combine_plots(
+  top_title = "Pearson Correlation and CCC (Male)",
+  bottom_title = "Pearson Correlation and CCC (Female)",
+  note = "Note: R - Pearson correlation coefficient; CCC - Concordance Correlation Coefficient (Lin's CC) with 95% CI",
+  top_row = top_row,
+  bottom_row = bottom_row
+)
+
+ggsave("CCC_sex_separated.png", CCC_sex_separated, width = 11, height = 10)
+```
+
+
+## Bland-Altman Plots
+
+### Function for Creating Bland-Altman Plots
+
+```{r bland_altman_func}
+bland_altman_plot <- function(data, var1, var2, title, x_label, y_label, annotation_x) {
+  # Calculate the difference and the mean
+  diff <- data[[var1]] - data[[var2]]
+  mean_vals <- (data[[var1]] + data[[var2]]) / 2
+  
+  # Calculate the mean difference and limits
+  mean_diff <- mean(diff) %>% round(1)
+  sd_diff <- sd(diff) %>% round(1)
+  upper_limit <- (mean_diff + 1.96 * sd_diff) %>% round(1)
+  lower_limit <- (mean_diff - 1.96 * sd_diff) %>% round(1)
+  
+  # Create plot
+  ggplot(data, aes(x = mean_vals, y = diff)) +
+    geom_point(alpha = 0.5) +
+    geom_hline(yintercept = mean_diff, color = "steelblue", linetype = "dashed", size = 1) +
+    geom_hline(yintercept = upper_limit, color = "darkred", linetype = "dashed", size = 1) +
+    geom_hline(yintercept = lower_limit, color = "darkred", linetype = "dashed", size = 1) +
+    annotate("text", x = annotation_x, y = mean_diff, 
+             label = paste0("Mean: ", mean_diff), vjust = -1, color = "steelblue") +
+    annotate("text", x = annotation_x, y = upper_limit, 
+             label = paste0("+ 1.96 SD: ", upper_limit), vjust = 1.5, color = "darkred") +
+    annotate("text", x = annotation_x, y = lower_limit, 
+             label = paste0("- 1.96 SD: ", lower_limit), vjust = -1, color = "darkred") +
+    labs(title = title,
+         x = x_label,
+         y = y_label) +
+    theme_minimal() +
+    theme(text = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5),
+          panel.border = element_rect(color = "black", fill = NA, size = 1))
+}
+```
+
+### Bland-Altman: Male
+
+```{r ba_plot_male}
+ba_plot_male_fm <- bland_altman_plot(
+  data = data_male,
+  var1 = "FM_BIA",
+  var2 = "FM_US",
+  title = "FM_BIA vs FM_US",
+  x_label = "Mean of measurements (FM_BIA vs FM_US)",
+  y_label = "Difference (FM_BIA — FM_US)",
+  annotation_x = 65
+)
+
+ba_plot_male_bf <- bland_altman_plot(
+  data = data_male,
+  var1 = "BF_BIA",
+  var2 = "BF_US",
+  title = "BF_BIA vs BF_US",
+  x_label = "Mean of measurements (BF_BIA vs BF_US)",
+  y_label = "Difference (BF_BIA — BF_US)",
+  annotation_x = 37
+)
+
+ba_plot_male_ffm <- bland_altman_plot(
+  data = data_male,
+  var1 = "FFM_BIA",
+  var2 = "FFM_US",
+  title = "FFM_BIA vs FFM_US",
+  x_label = "Mean of measurements (FFM_BIA vs FFM_US)",
+  y_label = "Difference (FFM_BIA — FFM_US)",
+  annotation_x = 117
+)
+
+```
+
+### Bland-Altman: Female
+
+```{r ba_plot_female}
+ba_plot_female_fm <- bland_altman_plot(
+  data = data_female,
+  var1 = "FM_BIA",
+  var2 = "FM_US",
+  title = "FM_BIA vs FM_US",
+  x_label = "Mean of measurements (FM_BIA vs FM_US)",
+  y_label = "Difference (FM_BIA — FM_US)",
+  annotation_x = 75
+)
+
+# BF
+ba_plot_female_bf <- bland_altman_plot(
+  data = data_female,
+  var1 = "BF_BIA",
+  var2 = "BF_US",
+  title = "BF_BIA vs BF_US",
+  x_label = "Mean of measurements (BF_BIA vs BF_US)",
+  y_label = "Difference (BF_BIA — BF_US)",
+  annotation_x = 46
+)
+
+# FFM
+ba_plot_female_ffm <- bland_altman_plot(
+  data = data_female,
+  var1 = "FFM_BIA",
+  var2 = "FFM_US",
+  title = "FFM_BIA vs FFM_US",
+  x_label = "Mean of measurements (FFM_BIA vs FFM_US)",
+  y_label = "Difference (FFM_BIA — FFM_US)",
+  annotation_x = 78
+)
+
+```
+
+
+### Combined Bland-Altman Plots for Men and Women
+
+```{r BA_plots, fig.height=10, fig.width=12}
+
+top_title <- textGrob("Bland Altman Plots (Male)", 
+                      gp = gpar(fontsize = 16, fontface = "bold"))
+bottom_title <- textGrob("Bland Altman Plots (Female)", 
+                         gp = gpar(fontsize = 16, fontface = "bold"))
+
+
+top_row <- arrangeGrob(ba_plot_male_fm, ba_plot_male_bf, ba_plot_male_ffm, ncol = 3)
+bottom_row <- arrangeGrob(ba_plot_female_fm, ba_plot_female_bf, ba_plot_female_ffm, ncol = 3)
+
+
+BA_plots <- grid.arrange(top_title, top_row, bottom_title, bottom_row,
+             ncol = 1, heights = c(0.1, 0.4, 0.1, 0.4))
+
+ggsave("BA_plots.png", BA_plots, height=10, width=12)
+```
+
+
+# Regression
+
+### Function for Regression and Regression Comparison Plots
+
+```{r perform_regression_plot_func}
+
+perform_regression_plot <- function(data, 
+                                    x_var, 
+                                    y_var, 
+                                    title = NA, 
+                                    xlab = x_var, 
+                                    ylab = y_var) {
+  # Square graphs
+  par(pty = "s")
+  
+  # Different regression methods
+  ols_result <- mcreg(x = data[[x_var]], y = data[[y_var]], method.reg = "LinReg")
+  deming_result <- mcreg(x = data[[x_var]], y = data[[y_var]], method.reg = "Deming")
+  pb_result <- mcreg(x = data[[x_var]], y = data[[y_var]], method.reg = "PaBaLarge")
+  
+  # Calculating slopes
+  ols_slope <- round(ols_result@para[2], 2)  
+  deming_slope <- round(deming_result@para[2], 2) 
+  pb_slope <- round(pb_result@para[2], 2) 
+  
+  # CCC with 95 CI
+  ccc_result <- epi.ccc(data[[x_var]], data[[y_var]])$rho.c
+  ccc_text <- paste("CCC with 95 CI = ", round(ccc_result[1], 2), 
+                    " (", round(ccc_result[2], 2), " - ", 
+                    round(ccc_result[3], 2), ")", sep = "")
+  
+  # Pearson's coefficient and R2
+  pearson_r <- cor(data[[x_var]], data[[y_var]], method = "pearson")
+  r_squared <- round(pearson_r^2, 2)
+  pearson_text <- paste0("Pearson R = ", round(pearson_r, 2), ", R² = ", r_squared)
+  
+  # Create plot
+  plot(x = data[[x_var]], y = data[[y_var]], 
+       main = title, 
+       xlab = xlab, 
+       ylab = ylab, 
+       pch = 16,
+       col = "#00000080",
+       cex = 0.8,
+       cex.lab = 1.2,
+       cex.axis = 1.2)
+  
+  # Adding Regression Lines
+  abline(ols_result@para[1:2], col = "#FF000080", lwd = 2)
+  abline(deming_result@para[1:2], col = "#0000FF80", lwd = 2) 
+  abline(pb_result@para[1:2], col = "#00FF0080", lwd = 2) 
+  
+  # Adding line y = x
+  abline(a = 0, b = 1, col = "black", lty = 2, lwd = 2)
+  
+  # Legend on the left
+  legend("topleft", 
+         legend = c(paste0("OLS (slope: ", ols_slope, ")"), 
+                    paste0("Deming (slope: ", deming_slope, ")"), 
+                    paste0("Passing-Bablok (slope: ", pb_slope, ")"), 
+                    "45° Line"),
+         lty = c(1, 1, 1, 2),  # Lines type
+         lwd = c(2, 2, 2, 2),
+         col = c("#FF000080", "#0000FF80", "#00FF0080", "black"))
+  
+  # Legend on the right with CCC and R
+  legend("bottomright", 
+         legend = c(ccc_text, pearson_text)) 
+}
+```
+
+
+
+### Regression Comparison Plots
+
+```{r perform_regression_plot_full, fig.width=14, fig.height=6}
+perform_regression_plot_f <- par(mfrow = c(1, 3))
+
+perform_regression_plot(data = data, x_var = "FM_BIA", y_var = "FM_US")
+perform_regression_plot(data = data, x_var = "BF_BIA", y_var = "BF_US")
+perform_regression_plot(data = data, x_var = "FFM_BIA", y_var = "FFM_US")
+
+mtext("Regression Comparison for Body Composition Measures", side = 3, line = -5, outer = TRUE, cex = 1.5)
+
+```
+
+
+
+
+
+### Function for recalculating values and plotting
+
+```{r plot_regression_recalculation_func}
+plot_regression_recalculation <- function(data, x_var, y_var, title = NA, xlab = x_var, ylab = y_var) {
+  
+  ols_result <- mcreg(x = data[[x_var]], y = data[[y_var]], method.reg = "LinReg")
+  
+  ols_slope <- round(ols_result@para[2], 2)
+  ols_intercept <- round(ols_result@para[1], 2)
+  
+  adjusted_values_ols <- ols_slope * data[[x_var]] + ols_intercept
+  
+  new_col_name <- paste0(y_var, "c")
+  data[[new_col_name]] <- adjusted_values_ols
+  
+  ols_equation <- ifelse(
+    ols_intercept < 0,
+    paste0(new_col_name, " = ", ols_slope, " * ", x_var, " - ", abs(ols_intercept)),
+    paste0(new_col_name, " = ", ols_slope, " * ", x_var, " + ", ols_intercept))
+  
+  
+  # CCC with 95 CI
+  ccc_result <- epi.ccc(data[[x_var]], data[[new_col_name]])$rho.c
+  ccc_text <- paste("CCC with 95 CI = ", round(ccc_result[1], 2), 
+                    " (", round(ccc_result[2], 2), " - ", 
+                    round(ccc_result[3], 2), ")", sep = "")
+  
+  # Pearson's coefficient and R2
+  pearson_r <- cor(data[[x_var]], data[[new_col_name]], method = "pearson")
+  r_squared <- round(pearson_r^2, 2)
+  pearson_text <- paste0("Pearson R = ", round(pearson_r, 2), ", R² = ", r_squared)
+  
+  # Create plot
+  plot(x = data[[x_var]], y = data[[new_col_name]], 
+       main = title, 
+       xlab = xlab, 
+       ylab = new_col_name, 
+       pch = 16,
+       col = "darkred",
+       cex = 0.8,
+       cex.lab = 1.2,
+       cex.axis = 1.2)
+  
+  
+  # Adding line y = x
+  abline(a = 0, b = 1, col = "black", lty = 2, lwd = 2)
+  
+  # Legend on the left
+  legend("topleft", 
+         legend = "45° Line",
+         lty = 2,
+         lwd = 2,
+         col = "black")
+  
+  legend("topright", 
+         legend = ols_equation,
+         cex = 1.2)
+  
+  # Legend on the right with CCC and R
+  legend("bottomright", 
+         legend = c(ccc_text, pearson_text))
+  
+}
+
+
+
+```
+
+### Adjusted Plots 
+
+```{r plot_regression_recalculation_full, fig.width=14, fig.height=5}
+par(mfrow = c(1, 3))
+
+plot_regression_recalculation(data, x_var = "FM_BIA", y_var = "FM_US")
+plot_regression_recalculation(data, x_var = "BF_BIA", y_var = "BF_US")
+plot_regression_recalculation(data, x_var = "FFM_BIA", y_var = "FFM_US")
+
+mtext("Adjusted Data Plots: OLS Regression", side = 3, line = -2, outer = TRUE, cex = 1.5)
+```
+
+
