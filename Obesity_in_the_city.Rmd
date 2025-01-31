@@ -412,11 +412,73 @@ create_comparison_plot(data,
 
 ## Pearson correlation. Figures
 
-```{r Correlation }
-#
-#
-#
-#
+```{r Correlation, fig.height=15, fig.width = 17}
+plot_male1 <- data_male %>%
+  ggplot(aes(x = Age, y = BMI), fig.height = 5)+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+plot_male2 <- data_male %>%
+  ggplot(aes(x = FM_US, y = FM_BIA))+
+  geom_point()+
+  geom_smooth(method = 'lm', color = 'red')+
+  labs(x = 'Fat mass (US)', y = 'Fat mass (BIA)')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+plot_male3 <- data_male %>%
+  ggplot(aes(x = FFM_US, y = FFM_BIA))+
+  geom_point()+
+  geom_smooth(method = 'lm', color = 'green')+
+  labs(x = 'Fat free mass (US)', y = 'Fat free mass (BIA)')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+plot_male4 <- data_male %>%
+  ggplot(aes(x = BF_US, y = BF_BIA))+
+  geom_point()+
+  geom_smooth(method = 'lm', color = 'yellow')+
+  labs(x = 'Body fat % (US)', y = 'Body fat % (BIA)')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+ggarrange(plotlist = list(plot_male1,plot_male2, plot_male3, plot_male4), ncol = 2, nrow = 2)
+
+
+plot_female1 <- data_female %>%
+  ggplot(aes(x = Age, y = BMI), fig.height = 5)+
+  geom_point()+
+  geom_smooth(method = 'lm')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+plot_female2 <- data_female %>%
+  ggplot(aes(x = FM_US, y = FM_BIA))+
+  geom_point()+
+  geom_smooth(method = 'lm', color = 'red')+
+  labs(x = 'Fat mass (US)', y = 'Fat mass (BIA)')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+plot_female3 <- data_female %>%
+  ggplot(aes(x = FFM_US, y = FFM_BIA))+
+  geom_point()+
+  geom_smooth(method = 'lm', color = 'green')+
+  labs(x = 'Fat free mass (US)', y = 'Fat free mass (BIA)')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+plot_female4 <- data_female %>%
+  ggplot(aes(x = BF_US, y = BF_BIA))+
+  geom_point()+
+  geom_smooth(method = 'lm', color = 'yellow')+
+  labs(x = 'Body fat % (US)', y = 'Body fat % (BIA)')+
+  theme_bw()+
+  theme(axis.title = element_text(size = 20))
+
+ggarrange(plotlist = list(plot_female1,plot_female2, plot_female3, plot_female4), ncol = 2, nrow = 2)
 
 ```
 
