@@ -412,6 +412,15 @@ create_comparison_plot(data,
 
 ## Pearson correlation. Figures
 
+```{r Correlation }
+#
+#
+#
+#
+
+```
+
+
 ### Figure 4. Corrplot - Male
 
 ```{r fig4, fig.height=10, fig.width=10}
