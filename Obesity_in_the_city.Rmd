@@ -16,6 +16,8 @@ knitr::opts_chunk$set(
 	message = FALSE,
 	warning = FALSE
 )
+library(car)
+library(performance)
 library(tidyverse)
 library(readxl)
 library(psych)
@@ -900,85 +902,516 @@ mtext("Regression Comparison for Body Composition Measures", side = 3, line = -5
 
 
 
+### Create Regression Model
 
-### Function for recalculating values and plotting
+```{r}
+model_with_covariates_FM <- lm(FM_BIA ~ FM_US + (Sex*Age) + Height + Weight, data = data)
 
-```{r plot_regression_recalculation_func}
-plot_regression_recalculation <- function(data, x_var, y_var, title = NA, xlab = x_var, ylab = y_var) {
+model_with_covariates_BF <- lm(BF_BIA ~ BF_US + Sex*Age + Height + Weight, data = data)
+
+model_with_covariates_FFM <- lm(FFM_BIA ~ FFM_US + Sex*Age + Height + Weight, data = data)
+
+                                             
+```
+
+
+
+#### Multicollinearity assessment.
+
+```{r, fig.width=12, fig.height=5}
+
+vif(model_with_covariates_FM)
+check_model(model_with_covariates_FM, check ="vif")
+
+```
+
+```{r}
+vif(model_with_covariates_BF)
+check_model(model_with_covariates_BF, check ="vif")
+
+```
+
+```{r}
+vif(model_with_covariates_FFM)
+check_model(model_with_covariates_FFM, check ="vif")
+```
+
+
+
+
+
+#### Table of estimates and confidence intervals
+
+```{r}
+tidy(model_with_covariates_FM, conf.int = TRUE)
+
+tidy(model_with_covariates_BF, conf.int = TRUE)
+
+tidy(model_with_covariates_FFM, conf.int = TRUE)
+
+```
+
+
+
+
+
+
+### Formula calculation function
+
+```{r}
+get_regression_equations <- function(model, sex_var = "SexMale") {
+  # Извлечение коэффициентов
+  coefficients <- coef(model)
   
-  ols_result <- mcreg(x = data[[x_var]], y = data[[y_var]], method.reg = "LinReg")
+  # Извлечение отдельных коэффициентов
+  intercept <- coefficients["(Intercept)"]
+  slope_FM_US <- coefficients["FM_US"]
+  slope_SexMale <- coefficients[sex_var]
+  slope_Age <- coefficients["Age"]
+  slope_Height <- coefficients["Height"]
+  slope_Weight <- coefficients["Weight"]
+  slope_Interaction <- coefficients[paste0(sex_var, ":Age")]
   
-  ols_slope <- round(ols_result@para[2], 2)
-  ols_intercept <- round(ols_result@para[1], 2)
+  # Уравнение для женщин (Sex = 0)
+  female_eq <- paste0(
+    "FM_BIA = ", round(intercept, 5),
+    " + ", round(slope_FM_US, 5), " * FM_US",
+    " + ", round(slope_Age, 5), " * Age",
+    " + ", round(slope_Height, 5), " * Height",
+    " + ", round(slope_Weight, 5), " * Weight"
+  )
   
-  adjusted_values_ols <- ols_slope * data[[x_var]] + ols_intercept
+  # Уравнение для мужчин (Sex = 1)
+  male_eq <- paste0(
+    "FM_BIA = ", round(intercept + slope_SexMale, 5),
+    " + ", round(slope_FM_US, 5), " * FM_US",
+    " + ", round(slope_Age + slope_Interaction, 5), " * Age",
+    " + ", round(slope_Height, 5), " * Height",
+    " + ", round(slope_Weight, 5), " * Weight"
+  )
   
-  new_col_name <- paste0(y_var, "c")
-  data[[new_col_name]] <- adjusted_values_ols
+  # Возвращаем уравнения
+  return(list(Female = female_eq, Male = male_eq))
+}
+
+
+```
+
+
+### Output of equations
+```{r}
+equations <- get_regression_equations(model_with_covariates_FM)
+
+
+print(equations$Female)
+print(equations$Male)
+```
+
+
+
+## predicted Value
+
+```{r}
+data$FM_BIA_predicted <- predict(model_with_covariates_FM) %>% round(1)
+data$BF_BIA_predicted <- predict(model_with_covariates_BF) %>% round(1)
+data$FFM_BIA_predicted <- predict(model_with_covariates_FFM) %>% round(1)
+
+```
+
+
+
+## Separation of data by sex for plots
+
+```{r}
+data_male_predict <- data %>% filter(Sex %in% "Male")
+data_female_predict <- data %>% filter(Sex %in% "Female")
+```
+
+
+## Function for predicting values and plotting
+
+```{r}
+plot_regression_recalculation <- function(data, x_var, y_var, sex_var, title = NA, xlab = x_var, ylab = y_var) {
   
-  ols_equation <- ifelse(
-    ols_intercept < 0,
-    paste0(new_col_name, " = ", ols_slope, " * ", x_var, " - ", abs(ols_intercept)),
-    paste0(new_col_name, " = ", ols_slope, " * ", x_var, " + ", ols_intercept))
   
-  
-  # CCC with 95 CI
-  ccc_result <- epi.ccc(data[[x_var]], data[[new_col_name]])$rho.c
-  ccc_text <- paste("CCC with 95 CI = ", round(ccc_result[1], 2), 
-                    " (", round(ccc_result[2], 2), " - ", 
-                    round(ccc_result[3], 2), ")", sep = "")
-  
-  # Pearson's coefficient and R2
-  pearson_r <- cor(data[[x_var]], data[[new_col_name]], method = "pearson")
-  r_squared <- round(pearson_r^2, 2)
-  pearson_text <- paste0("Pearson R = ", round(pearson_r, 2), ", R² = ", r_squared)
-  
-  # Create plot
-  plot(x = data[[x_var]], y = data[[new_col_name]], 
+  # Plot
+  plot(x = data[[x_var]], y = data[[y_var]], 
        main = title, 
        xlab = xlab, 
-       ylab = new_col_name, 
+       ylab = ylab, 
        pch = 16,
-       col = "darkred",
+       col = ifelse(data[[sex_var]] == "Male", "#1f77b4", "#ff7f0e"),
        cex = 0.8,
        cex.lab = 1.2,
        cex.axis = 1.2)
   
+  # Добавление линий регрессии для каждого пола отдельно
+  males <- data[data[[sex_var]] == "Male", ]
+  females <- data[data[[sex_var]] == "Female", ]
   
-  # Adding line y = x
-  abline(a = 0, b = 1, col = "black", lty = 2, lwd = 2)
+  model_male <- lm(as.formula(paste(y_var, "~", x_var)), data = males)
+  abline(model_male, col = "#1f77b4", lwd = 2)
   
-  # Legend on the left
+  model_female <- lm(as.formula(paste(y_var, "~", x_var)), data = females)
+  abline(model_female, col = "#ff7f0e", lwd = 2)
+  
+  # Add legend
   legend("topleft", 
-         legend = "45° Line",
-         lty = 2,
-         lwd = 2,
-         col = "black")
-  
-  legend("topright", 
-         legend = ols_equation,
+         legend = c("Male", "Female"), 
+         pch = c(16, 16), col = c("#1f77b4", "#ff7f0e"),
          cex = 1.2)
-  
-  # Legend on the right with CCC and R
-  legend("bottomright", 
-         legend = c(ccc_text, pearson_text))
-  
 }
-
 
 
 ```
 
 ### Adjusted Plots 
 
-```{r plot_regression_recalculation_full, fig.width=14, fig.height=5}
+```{r, fig.width=14, fig.height=5}
 par(mfrow = c(1, 3))
 
-plot_regression_recalculation(data, x_var = "FM_BIA", y_var = "FM_US")
-plot_regression_recalculation(data, x_var = "BF_BIA", y_var = "BF_US")
-plot_regression_recalculation(data, x_var = "FFM_BIA", y_var = "FFM_US")
+plot_regression_recalculation(data, x_var = "FM_US", y_var = "FM_BIA_predicted", sex_var = "Sex")
+plot_regression_recalculation(data, x_var = "BF_US", y_var = "BF_BIA_predicted", sex_var = "Sex")
+plot_regression_recalculation(data, x_var = "FFM_US", y_var = "FFM_BIA_predicted", sex_var = "Sex")
 
-mtext("Adjusted Data Plots: OLS Regression", side = 3, line = -2, outer = TRUE, cex = 1.5)
+mtext("Predicted Data Plots: OLS Regression", side = 3, line = -2, outer = TRUE, cex = 1.5)
 ```
 
 
+
+
+
+## Function for predicting values and plotting for Men and Women
+
+```{r}
+plot_regression_recalculation <- function(data, x_var, y_var, sex_var, title = NA, xlab = x_var, ylab = y_var) {
+  
+  
+  # Plot
+  plot(x = data[[x_var]], y = data[[y_var]], 
+       main = title, 
+       xlab = xlab, 
+       ylab = ylab, 
+       pch = 16,
+       col = ifelse(data[[sex_var]] == "Male", "#1f77b4", "#ff7f0e"),
+       cex = 0.8,
+       cex.lab = 1.2,
+       cex.axis = 1.2)
+  
+  # Добавление линий регрессии для каждого пола отдельно
+  males <- data[data[[sex_var]] == "Male", ]
+  females <- data[data[[sex_var]] == "Female", ]
+  
+  model_male <- lm(as.formula(paste(y_var, "~", x_var)), data = males)
+  abline(model_male, col = "#1f77b4", lwd = 2)
+  
+  model_female <- lm(as.formula(paste(y_var, "~", x_var)), data = females)
+  abline(model_female, col = "#ff7f0e", lwd = 2)
+  
+  # Add legend
+  legend("topleft", 
+         legend = c("Male", "Female"), 
+         pch = c(16, 16), col = c("#1f77b4", "#ff7f0e"),
+         cex = 1.2)
+}
+
+
+```
+
+### Adjusted Plots 
+
+```{r, fig.width=14, fig.height=5}
+par(mfrow = c(1, 3))
+
+plot_regression_recalculation(data, x_var = "FM_US", y_var = "FM_BIA_predicted", sex_var = "Sex")
+plot_regression_recalculation(data, x_var = "BF_US", y_var = "BF_BIA_predicted", sex_var = "Sex")
+plot_regression_recalculation(data, x_var = "FFM_US", y_var = "FFM_BIA_predicted", sex_var = "Sex")
+
+mtext("Predicted Data Plots: OLS Regression", side = 3, line = -2, outer = TRUE, cex = 1.5)
+```
+
+
+
+
+
+
+
+## Function CCC
+```{r}
+CCC_value_predicted <- function(data, 
+                                    x_var, 
+                                    y_var, 
+                                    title = NA, 
+                                    xlab = x_var, 
+                                    ylab = y_var,
+                                gender) {
+  if (gender == "Male") {
+    color = "#1f77b4"
+  } 
+  else {
+    color = "#ff7f0e"
+  }
+  # Square graphs
+  par(pty = "s")
+  
+  # CCC with 95 CI
+  ccc_result <- epi.ccc(data[[x_var]], data[[y_var]])$rho.c
+  ccc_text <- paste("CCC with 95 CI = ", round(ccc_result[1], 2), 
+                    " (", round(ccc_result[2], 2), " - ", 
+                    round(ccc_result[3], 2), ")", sep = "")
+  
+  # Create plot
+  plot(x = data[[x_var]], y = data[[y_var]], 
+       main = title, 
+       xlab = xlab, 
+       ylab = ylab, 
+       pch = 16,
+       col = color,
+       cex = 0.8,
+       cex.lab = 1.2,
+       cex.axis = 1.2)
+  
+
+  # Adding line y = x
+  abline(a = 0, b = 1, col = "black", lty = 2, lwd = 2)
+  
+  # Legend on the left
+  legend("topleft", 
+         legend = "45° Line",
+         lty = 2,  # Lines type
+         lwd = 2,
+         col = "black")
+  
+  # Legend on the right with CCC and R
+  legend("bottomright", legend = ccc_text, cex = 1.2) 
+}
+```
+
+
+### Men
+
+```{r, fig.width=14, fig.height=5}
+par(mfrow = c(1, 3))
+
+CCC_value_predicted(data_male_predict, x_var = "FM_BIA", y_var = "FM_BIA_predicted", gender = "Male")
+CCC_value_predicted(data_male_predict, x_var = "BF_BIA", y_var = "BF_BIA_predicted", gender = "Male")
+CCC_value_predicted(data_male_predict, x_var = "FFM_BIA", y_var = "FFM_BIA_predicted", gender = "Male")
+
+
+mtext("Predicted vs. Actual Data Plots (Male)", side = 3, line = -2, outer = TRUE, cex = 1.5)
+```
+
+
+
+
+### Women
+
+```{r, fig.width=14, fig.height=5}
+par(mfrow = c(1, 3))
+
+CCC_value_predicted(data_female_predict, x_var = "FM_BIA", y_var = "FM_BIA_predicted", gender = "Female")
+CCC_value_predicted(data_female_predict, x_var = "BF_BIA", y_var = "BF_BIA_predicted", gender = "Female")
+CCC_value_predicted(data_female_predict, x_var = "FFM_BIA", y_var = "FFM_BIA_predicted", gender = "Female")
+
+
+mtext("Predicted vs. Actual Data Plots (Female)", side = 3, line = -2, outer = TRUE, cex = 1.5)
+```
+
+
+
+
+## Function CCC with Sex
+```{r}
+CCC_value_predicted_Sex <- function(data, 
+                                x_var, 
+                                y_var, 
+                                title = NA, 
+                                xlab = x_var, 
+                                ylab = y_var, 
+                                sex_var) {
+  # Square graphs
+  par(pty = "s")
+  
+  # CCC with 95 CI
+  ccc_result <- epi.ccc(data[[x_var]], data[[y_var]])$rho.c
+  ccc_text <- paste("CCC with 95 CI = ", round(ccc_result[1], 2), 
+                    " (", round(ccc_result[2], 2), " - ", 
+                    round(ccc_result[3], 2), ")", sep = "")
+  
+  # Define colors
+  colors <- ifelse(data[[sex_var]] == "Male", "#1f77b4", "#ff7f0e")
+  
+  # Create plot
+  plot(x = data[[x_var]], y = data[[y_var]], 
+       main = title, 
+       xlab = xlab, 
+       ylab = ylab, 
+       pch = 16,
+       col = colors,
+       cex = 0.8,
+       cex.lab = 1.2,
+       cex.axis = 1.2)
+  
+  # Adding line y = x
+  abline(a = 0, b = 1, col = "black", lty = 2, lwd = 2)
+  
+  # Legend on the left
+  legend("topleft", 
+         legend = c("Male", "Female", "45° Line"),
+         pch = c(16, 16, NA),
+         lty = c(NA, NA, 2),  # Line type for 45° line
+         lwd = c(NA, NA, 2),
+         col = c("#1f77b4", "#ff7f0e", "black"))
+  
+  # Legend on the right with CCC and R
+  legend("bottomright", legend = ccc_text, cex = 1.2) 
+}
+
+```
+
+
+
+```{r, fig.width=14, fig.height=5}
+par(mfrow = c(1, 3))
+
+CCC_value_predicted_Sex(data, x_var = "FM_BIA", y_var = "FM_BIA_predicted", sex_var = "Sex")
+CCC_value_predicted_Sex(data, x_var = "BF_BIA", y_var = "BF_BIA_predicted", sex_var = "Sex")
+CCC_value_predicted_Sex(data, x_var = "FFM_BIA", y_var = "FFM_BIA_predicted", sex_var = "Sex")
+
+
+mtext("Predicted vs. Actual Data Plots", side = 3, line = -2, outer = TRUE, cex = 1.5)
+```
+
+
+
+
+
+## Bland-Altman Plots
+
+### Function for Creating Bland-Altman Plots
+
+```{r}
+bland_altman_plot <- function(data, var1, var2, title, x_label, y_label, annotation_x) {
+  # Calculate the difference and the mean
+  diff <- data[[var1]] - data[[var2]]
+  mean_vals <- (data[[var1]] + data[[var2]]) / 2
+  
+  # Calculate the mean difference and limits
+  mean_diff <- mean(diff) %>% round(1)
+  sd_diff <- sd(diff) %>% round(1)
+  upper_limit <- (mean_diff + 1.96 * sd_diff) %>% round(1)
+  lower_limit <- (mean_diff - 1.96 * sd_diff) %>% round(1)
+  
+  # Create plot
+  ggplot(data, aes(x = mean_vals, y = diff)) +
+    geom_point(alpha = 0.5) +
+    geom_hline(yintercept = mean_diff, color = "steelblue", linetype = "dashed", size = 1) +
+    geom_hline(yintercept = upper_limit, color = "darkred", linetype = "dashed", size = 1) +
+    geom_hline(yintercept = lower_limit, color = "darkred", linetype = "dashed", size = 1) +
+    annotate("text", x = annotation_x, y = mean_diff, 
+             label = paste0("Mean: ", mean_diff), vjust = -1, color = "steelblue") +
+    annotate("text", x = annotation_x, y = upper_limit, 
+             label = paste0("+ 1.96 SD: ", upper_limit), vjust = 1.5, color = "darkred") +
+    annotate("text", x = annotation_x, y = lower_limit, 
+             label = paste0("- 1.96 SD: ", lower_limit), vjust = -1, color = "darkred") +
+    labs(title = title,
+         x = x_label,
+         y = y_label) +
+    theme_minimal() +
+    theme(text = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5),
+          panel.border = element_rect(color = "black", fill = NA, size = 1))
+}
+```
+
+### For men
+
+```{r}
+ba_plot_male_fm <- bland_altman_plot(
+  data = data_male_predict,
+  var1 = "FM_BIA_predicted",
+  var2 = "FM_BIA",
+  title = "FM_BIA_predicted vs FM_BIA",
+  x_label = "Mean of measurements (FM_BIA_predicted vs FM_BIA)",
+  y_label = "Difference (FM_BIA_predicted — FM_BIA)",
+  annotation_x = 70
+)
+
+ba_plot_male_bf <- bland_altman_plot(
+  data = data_male_predict,
+  var1 = "BF_BIA_predicted",
+  var2 = "BF_BIA",
+  title = "BF_BIA_predicted vs BF_BIA",
+  x_label = "Mean of measurements (BF_BIA_predicted vs BF_BIA)",
+  y_label = "Difference (BF_BIA_predicted — BF_BIA)",
+  annotation_x = 40
+)
+
+ba_plot_male_ffm <- bland_altman_plot(
+  data = data_male_predict,
+  var1 = "FFM_BIA_predicted",
+  var2 = "FFM_BIA",
+  title = "FFM_BIA_predicted vs FFM_BIA",
+  x_label = "Mean of measurements (FFM_BIA_predicted vs FFM_BIA)",
+  y_label = "Difference (FFM_BIA_predicted — FFM_BIA)",
+  annotation_x = 105
+)
+```
+
+### For women
+
+```{r}
+ba_plot_female_fm <- bland_altman_plot(
+  data = data_female_predict,
+  var1 = "FM_BIA_predicted",
+  var2 = "FM_BIA",
+  title = "FM_BIA_predicted vs FM_BIA",
+  x_label = "Mean of measurements (FM_BIA_predicted vs FM_BIA)",
+  y_label = "Difference (FM_BIA_predicted — FM_BIA)",
+  annotation_x = 80
+)
+
+# BF
+ba_plot_female_bf <- bland_altman_plot(
+  data = data_female_predict,
+  var1 = "BF_BIA_predicted",
+  var2 = "BF_BIA",
+  title = "BF_BIA_predicted vs BF_BIA",
+  x_label = "Mean of measurements (BF_BIA_predicted vs BF_BIA)",
+  y_label = "Difference (BF_BIA_predicted — BF_BIA)",
+  annotation_x = 47
+)
+
+# FFM
+ba_plot_female_ffm <- bland_altman_plot(
+  data = data_female_predict,
+  var1 = "FFM_BIA_predicted",
+  var2 = "FFM_BIA",
+  title = "FFM_BIA_predicted vs FFM_BIA",
+  x_label = "Mean of measurements (FFM_BIA_predicted vs FFM_BIA)",
+  y_label = "Difference (FFM_BIA_predicted — FFM_BIA)",
+  annotation_x = 68
+)
+
+```
+
+
+### Combined Bland-Altman Plots for Men and Women
+
+```{r, fig.height=10, fig.width=14}
+
+top_title <- textGrob("Bland Altman Plots (Male)", 
+                      gp = gpar(fontsize = 16, fontface = "bold"))
+bottom_title <- textGrob("Bland Altman Plots (Female)", 
+                         gp = gpar(fontsize = 16, fontface = "bold"))
+
+# Создаем панели с графиками
+top_row <- arrangeGrob(ba_plot_male_fm, ba_plot_male_bf, ba_plot_male_ffm, ncol = 3)
+bottom_row <- arrangeGrob(ba_plot_female_fm, ba_plot_female_bf, ba_plot_female_ffm, ncol = 3)
+
+# Объединяем всё в один рисунок с заголовками
+grid.arrange(top_title, top_row, bottom_title, bottom_row,
+             ncol = 1, heights = c(0.1, 0.4, 0.1, 0.4))
+
+
+```
