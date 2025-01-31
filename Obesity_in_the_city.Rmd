@@ -218,7 +218,7 @@ plot_bmi_vs_composition <- function(data, sex_filter = NULL) {
   
 
   bmi_counts <- data %>%
-    mutate(category = cut(BMI, breaks = c(-Inf, 18.5, 25, 30, 40, Inf), 
+    mutate(category = cut(BMI, breaks = c(min(BMI), 18.5, 25, 30, 40, max(BMI)), 
                           labels = c("Underweight", "Normal", "Overweight", "Obesity", "Morbid obesity"),
                           include.lowest = TRUE)) %>%
     count(category) %>%
@@ -229,6 +229,15 @@ plot_bmi_vs_composition <- function(data, sex_filter = NULL) {
     left_join(bmi_counts, by = c("label" = "category")) %>%
     mutate(percent_label = ifelse(!is.na(percent), paste0(round(percent, 1), "%"), "0%"))
   
+  
+  bmi_categories <- bmi_categories %>%
+    mutate(
+      x_text = case_when(
+        xmin == -Inf ~ 18.5 - 3,  # Сдвигаем метку для Underweight внутрь
+        xmax == Inf ~ 40 + 15,     # Сдвигаем метку для Morbid obesity внутрь
+        TRUE ~ (xmin + xmax) / 2  # Для остальных категорий оставляем по центру
+      )
+    )
 
   data_long <- data %>%
     pivot_longer(cols = c(FM_BIA, FM_US, FFM_BIA, FFM_US), 
@@ -246,7 +255,7 @@ plot_bmi_vs_composition <- function(data, sex_filter = NULL) {
               aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, fill = label), 
               inherit.aes = FALSE, alpha = 0.2) +
     geom_text(data = bmi_categories, 
-              aes(x = (xmin + xmax) / 2, y = 95, label = percent_label), 
+              aes(x = x_text, y = 95, label = percent_label), 
               inherit.aes = FALSE, color = "black", size = 4.5, vjust = 0) +
     geom_point(alpha = 0.7, size = 3) +
     geom_vline(data = bmi_categories, aes(xintercept = xmax), 
