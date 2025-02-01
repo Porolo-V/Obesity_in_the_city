@@ -68,8 +68,9 @@ ___
 ### Correlation and agreement analys results
 - The **Pearson** correlation coefficients for the measurements of the two methods range from 0,83 - 0,97, indicating a very strong linear relationship between the BIA and ultrasound methods.
 
-![Image](https://github.com/user-attachments/assets/570684b7-fe8a-4b70-a61d-ecb428a13274)
-![Image](https://github.com/user-attachments/assets/72012ab3-3edc-4047-921c-b29265392120)
+![cor_male](https://github.com/user-attachments/assets/2c54e274-28d9-4366-beb4-c5e90d226ebb)
+![cor_fem](https://github.com/user-attachments/assets/cc43a7f7-b049-4345-8940-75dca2be053c)
+
 
 - However, there is poor agreement by  **Lin’s concordance correlation coefficient** for most of the method comparisons.
 
@@ -87,6 +88,18 @@ ___
 
 ![Image](https://github.com/user-attachments/assets/b8c36137-79fc-4a7d-8efe-c4557dac5560)
 
-### Agreement of metrics after correction 
+### Adjusted Plots
 
-![Image](https://github.com/user-attachments/assets/4631fbea-75b4-4a21-836f-ff4f601513c9)
+![regression_new](https://github.com/user-attachments/assets/742d9bdc-7210-4579-9f70-e3173d26f4b8)
+![corrected_reg](https://github.com/user-attachments/assets/1a2e0f0f-6a5f-4846-baa4-5e8f7659431f)
+
+## Bland-Altman Plots after data correction 
+
+![ba_new](https://github.com/user-attachments/assets/eba39985-e588-4740-8077-4be8d40da8c7)
+---
+# Conclusion
+
+1. In the consistency analysis, Pearson correlation coefficients indicated a very strong linear relationship between the methods. However, the results of Lin's concordance correlation coefficient assessment showed weak agreement for most method comparisons. Combined with the Bland-Altman analysis, which revealed systematic biases and a tendency for one method to overestimate or underestimate values, this indicates an insufficient level of measurement agreement between the two methods.
+2. After building the model and performing regression analysis, a formula was derived, data correction was applied, and the assessment of measurement interchangeability was repeated. As a result, the level of agreement between the metrics qualitatively improved.
+3. After correcting systematic errors and improving measurement consistency, the data obtained using the two methods (or devices) became sufficiently consistent for direct comparison within our sample. However, to assess the accuracy of our formula, validation on other samples is required, for example, using machine learning methods.
+
